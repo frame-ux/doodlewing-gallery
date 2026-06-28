@@ -89,6 +89,9 @@
 }
 
 .gallery-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   border: 1px solid rgba(251, 246, 234, 0.3);
   border-radius: 999px;
   background: rgba(37, 34, 30, 0.54);
@@ -99,13 +102,47 @@
   pointer-events: auto;
   cursor: pointer;
   backdrop-filter: blur(12px);
+  transition: background 180ms ease, transform 180ms ease, border-color 180ms ease;
 }
 
 .gallery-pill:hover {
+  border-color: rgba(255, 209, 102, 0.72);
   background: rgba(255, 107, 95, 0.88);
+  transform: translateY(-1px);
 }
 
-#door-hint {
+.mini-wing {
+  position: relative;
+  width: 22px;
+  height: 12px;
+  display: inline-block;
+}
+
+.mini-wing::before,
+.mini-wing::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  width: 13px;
+  height: 8px;
+  border-radius: 999px 999px 999px 2px;
+  transform-origin: center;
+}
+
+.mini-wing::before {
+  left: 0;
+  background: var(--doodle-coral);
+  transform: rotate(-22deg);
+}
+
+.mini-wing::after {
+  right: 0;
+  background: var(--sunlit-yellow);
+  transform: rotate(22deg) scaleX(-1);
+}
+
+#door-hint,
+#spatial-prompt {
   position: fixed;
   left: 50%;
   bottom: 28px;
@@ -122,9 +159,33 @@
   transition: opacity 260ms ease, transform 260ms ease;
 }
 
-#door-hint.is-visible {
+#spatial-prompt {
+  border: 1px solid rgba(255, 209, 102, 0.34);
+  background: rgba(37, 34, 30, 0.84);
+}
+
+#door-hint.is-visible,
+#spatial-prompt.is-visible {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+#reticle.is-interactive {
+  opacity: 0.94;
+}
+
+#reticle.is-interactive::before,
+#reticle.is-interactive::after {
+  background: rgba(255, 209, 102, 0.95);
+  box-shadow: 0 0 16px rgba(255, 209, 102, 0.7);
+}
+
+#reticle.is-interactive::before {
+  height: 16px;
+}
+
+#reticle.is-interactive::after {
+  width: 16px;
 }
 
 #mode-transition {
@@ -163,6 +224,31 @@
 
 #shopfront.is-visible {
   display: block;
+}
+
+.back-float {
+  position: fixed;
+  right: clamp(16px, 3vw, 34px);
+  bottom: clamp(16px, 3vw, 34px);
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid rgba(37, 34, 30, 0.12);
+  border-radius: 999px;
+  background: rgba(251, 246, 234, 0.92);
+  color: var(--gallery-ink);
+  box-shadow: 0 18px 38px rgba(37, 34, 30, 0.18);
+  cursor: pointer;
+  font: 900 13px/1 var(--body-face);
+  padding: 12px 16px;
+  backdrop-filter: blur(16px);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.back-float:hover {
+  box-shadow: 0 22px 44px rgba(37, 34, 30, 0.24);
+  transform: translateY(-2px);
 }
 
 .shop-header {

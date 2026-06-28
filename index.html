@@ -182,9 +182,14 @@
       </div>
     </div>
     <div id="gallery-hud">
-      <button class="gallery-pill" type="button" data-open-shop>Gift shop</button>
+      <button class="gallery-pill brand-mini" type="button" data-open-shop="shop">
+        <span class="mini-wing" aria-hidden="true"></span>
+        <span>Shop</span>
+      </button>
+      <button class="gallery-pill" type="button" data-open-shop="about">About</button>
     </div>
     <div id="door-hint">Click the gift shop door to browse prints</div>
+    <div id="spatial-prompt">Look inside ▸ About Doodlewing</div>
     <div id="mode-transition" aria-hidden="true"><span>Gift shop</span></div>
     <main id="shopfront" aria-label="Doodlewing shopfront"></main>
     <div id="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
@@ -257,6 +262,8 @@
       const brandLoader = document.getElementById("brand-loader");
       const galleryHud = document.getElementById("gallery-hud");
       const doorHint = document.getElementById("door-hint");
+      const spatialPrompt = document.getElementById("spatial-prompt");
+      const reticle = document.getElementById("reticle");
       const modeTransition = document.getElementById("mode-transition");
       const shopfront = document.getElementById("shopfront");
       const checkoutModal = document.getElementById("checkout-modal");
@@ -303,9 +310,14 @@
       const raycaster = new THREE.Raycaster();
       const centerPointer = new THREE.Vector2(0, 0);
       const shopEntryTargets = [];
+      const aboutEntryTargets = [];
+      const wallTextState = { mesh: null, glow: null, baseScale: 1, value: 0 };
+      const cameraStep = { active: false, elapsed: 0, duration: 0.42, from: new THREE.Vector3(), to: new THREE.Vector3() };
       const basket = [];
       let mode = "gallery";
       let doorHintVisible = false;
+      let activeSpatialTarget = null;
+      let atmosphereMotes = null;
 
       const palette = {
         wall: 0xe2ddd2,
@@ -374,6 +386,7 @@
       buildEmptyLightingTargets();
       buildGiftShopDoorway();
       hangPaintings();
+      addGalleryAtmosphere();
       renderShopfront();
       window.setTimeout(() => brandLoader.classList.add("is-hidden"), reducedMotion ? 350 : 1250);
 
@@ -421,11 +434,15 @@
 
       renderer.domElement.addEventListener("click", () => {
         if (mode !== "gallery") return;
-        if (isLookingAtShopDoor()) showShopfront();
+        const target = activeSpatialTarget || getFocusedSpatialTarget();
+        if (target === "shop") showShopfront({ source: "door" });
+        if (target === "about") showShopfront({ section: "about", source: "wall" });
       });
 
       document.querySelectorAll("[data-open-shop]").forEach((button) => {
-        button.addEventListener("click", showShopfront);
+        button.addEventListener("click", () => {
+          showShopfront({ section: button.dataset.openShop === "about" ? "about" : "shop", source: "hud" });
+        });
       });
 
       shopfront.addEventListener("click", (event) => {
@@ -500,6 +517,15 @@
       renderer.domElement.addEventListener("pointercancel", endTouchLook);
 
       window.addEventListener("keydown", (event) => {
+        if (mode === "gallery" && (event.code === "KeyE" || event.code === "Enter")) {
+          const target = activeSpatialTarget || getFocusedSpatialTarget();
+          if (target === "shop") showShopfront({ source: "door" });
+          if (target === "about") showShopfront({ section: "about", source: "wall" });
+          if (target) {
+            event.preventDefault();
+            return;
+          }
+        }
         if (event.code === "Escape" && fallbackLook.active) {
           fallbackLook.active = false;
           fallbackLook.dragging = false;
@@ -908,6 +934,32 @@
         });
       }
 
+      function addGalleryAtmosphere() {
+        if (reducedMotion) return;
+        const count = 120;
+        const positions = new Float32Array(count * 3);
+        const random = seededRandom(31);
+        for (let i = 0; i < count; i += 1) {
+          positions[i * 3] = (random() - 0.5) * (ROOM.width - 1.6);
+          positions[i * 3 + 1] = 1.35 + random() * 2.35;
+          positions[i * 3 + 2] = (random() - 0.5) * (ROOM.depth - 2.0);
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        const material = new THREE.PointsMaterial({
+          color: 0xffefd5,
+          size: 0.018,
+          transparent: true,
+          opacity: 0.28,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending
+        });
+        const motes = new THREE.Points(geometry, material);
+        motes.userData.drift = true;
+        atmosphereMotes = motes;
+        scene.add(motes);
+      }
+
       function buildGiftShopDoorway() {
         const group = new THREE.Group();
         group.position.set(ROOM.width / 2 - 0.035, 0, GIFT_SHOP.wallZ);
@@ -983,13 +1035,37 @@
       }
 
       function addDoodlewingWallText() {
+        const material = new THREE.MeshBasicMaterial({
+          map: createDoodlewingWallTextTexture(),
+          transparent: true,
+          toneMapped: false
+        });
         const text = new THREE.Mesh(
-          new THREE.PlaneGeometry(1.55, 2.25),
-          new THREE.MeshBasicMaterial({ map: createDoodlewingWallTextTexture(), transparent: true })
+          new THREE.PlaneGeometry(2.35, 2.72),
+          material
         );
-        text.position.set(ROOM.width / 2 - 0.018, 2.05, 5.92);
+        text.position.set(ROOM.width / 2 - 0.018, 2.08, 2.62);
         text.rotation.y = -Math.PI / 2;
-        scene.add(text);
+        text.userData.isAboutEntry = true;
+
+        const glow = new THREE.Mesh(
+          new THREE.PlaneGeometry(2.55, 2.94),
+          new THREE.MeshBasicMaterial({
+            color: 0xffd166,
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+          })
+        );
+        glow.position.copy(text.position);
+        glow.position.x -= 0.006;
+        glow.rotation.copy(text.rotation);
+
+        scene.add(glow, text);
+        aboutEntryTargets.push(text);
+        wallTextState.mesh = text;
+        wallTextState.glow = glow;
       }
 
       function addGiftShopRoom(group, wallMat, floorMat, ceilingMat) {
@@ -1070,25 +1146,45 @@
 
       function createDoodlewingWallTextTexture() {
         const canvas = document.createElement("canvas");
-        canvas.width = 1000;
-        canvas.height = 1185;
+        canvas.width = 2048;
+        canvas.height = 2370;
         const context = canvas.getContext("2d");
         context.clearRect(0, 0, canvas.width, canvas.height);
-        context.fillStyle = "#2d2923";
         context.textAlign = "left";
         context.textBaseline = "top";
 
-        const marginX = 68;
-        let y = 66;
-        context.font = "500 36px Helvetica Neue, Arial, sans-serif";
-        y = drawWrappedCanvasText(context, DOODLEWING_WALL_TEXT[0], marginX, y, 850, 46);
-        y += 34;
+        const marginX = 138;
+        let y = 132;
+        context.fillStyle = "#ff6b5f";
+        context.font = "900 54px Inter, Helvetica Neue, Arial, sans-serif";
+        context.letterSpacing = "4px";
+        context.fillText("ABOUT THE SHOW", marginX, y);
+        context.letterSpacing = "0px";
+        y += 116;
 
-        context.font = "400 30px Helvetica Neue, Arial, sans-serif";
-        for (let i = 1; i < DOODLEWING_WALL_TEXT.length; i += 1) {
-          y = drawWrappedCanvasText(context, DOODLEWING_WALL_TEXT[i], marginX, y, 850, 40);
-          y += 28;
-        }
+        context.fillStyle = "#25221e";
+        context.font = "800 152px Fraunces, Georgia, serif";
+        y = drawWrappedCanvasText(context, "Doodlewing gives tiny artists a proper private view.", marginX, y, 1710, 154);
+        y += 72;
+
+        context.fillStyle = "rgba(37, 34, 30, 0.78)";
+        context.font = "500 63px Inter, Helvetica Neue, Arial, sans-serif";
+        y = drawWrappedCanvasText(context, DOODLEWING_WALL_TEXT[2], marginX, y, 1680, 86);
+        y += 52;
+        y = drawWrappedCanvasText(context, "Look closer to step into the story behind the gallery.", marginX, y, 1680, 86);
+        y += 96;
+
+        context.fillStyle = "#3d8cff";
+        context.font = "900 58px Inter, Helvetica Neue, Arial, sans-serif";
+        context.fillText("LOOK INSIDE  ▸", marginX, y);
+
+        context.strokeStyle = "rgba(255, 209, 102, 0.9)";
+        context.lineWidth = 14;
+        context.lineCap = "round";
+        context.beginPath();
+        context.moveTo(marginX, y + 110);
+        context.bezierCurveTo(marginX + 240, y + 154, marginX + 480, y + 58, marginX + 730, y + 100);
+        context.stroke();
 
         const texture = new THREE.CanvasTexture(canvas);
         texture.colorSpace = THREE.SRGBColorSpace;
@@ -1290,6 +1386,10 @@
         }).join("");
 
         shopfront.innerHTML = `
+          <button class="back-float" type="button" data-shop-action="gallery">
+            <span class="mini-wing" aria-hidden="true"></span>
+            <span>Back to the Gallery</span>
+          </button>
           <header class="shop-header">
             ${logoMarkup()}
             <nav class="shop-nav" aria-label="Shopfront navigation">
@@ -1376,10 +1476,11 @@
         document.getElementById("basket-summary").textContent = `${basket.length} item${basket.length === 1 ? "" : "s"} · £${total}`;
       }
 
-      function isLookingAtShopDoor() {
-        if (!shopEntryTargets.length) return false;
+      function getFocusedSpatialTarget() {
         raycaster.setFromCamera(centerPointer, camera);
-        return raycaster.intersectObjects(shopEntryTargets, false).length > 0;
+        if (raycaster.intersectObjects(aboutEntryTargets, false).length > 0) return "about";
+        if (raycaster.intersectObjects(shopEntryTargets, false).length > 0) return "shop";
+        return null;
       }
 
       function isNearShopDoor() {
@@ -1387,15 +1488,65 @@
         return position.x > ROOM.width / 2 - 1.5 && Math.abs(position.z - GIFT_SHOP.wallZ) < 1.45;
       }
 
+      function isNearWallText() {
+        if (!wallTextState.mesh) return false;
+        const position = controls.getObject().position;
+        return position.x > ROOM.width / 2 - 2.0 && Math.abs(position.z - wallTextState.mesh.position.z) < 1.9;
+      }
+
       function updateDoorHint() {
         if (mode !== "gallery") return;
-        const shouldShow = isNearShopDoor();
+        const shouldShow = isNearShopDoor() || activeSpatialTarget === "shop";
         if (shouldShow === doorHintVisible) return;
         doorHintVisible = shouldShow;
         doorHint.classList.toggle("is-visible", shouldShow);
       }
 
-      function showShopfront() {
+      function updateSpatialInteractions(delta) {
+        if (mode !== "gallery") {
+          activeSpatialTarget = null;
+          reticle.classList.remove("is-interactive");
+          spatialPrompt.classList.remove("is-visible");
+          return;
+        }
+        const focused = getFocusedSpatialTarget();
+        const nearAbout = isNearWallText();
+        activeSpatialTarget = focused || (nearAbout ? "about" : null);
+        const aboutActive = activeSpatialTarget === "about";
+        const targetValue = aboutActive ? 1 : 0;
+        const ease = 1 - Math.exp(-8 * delta);
+        wallTextState.value += (targetValue - wallTextState.value) * ease;
+
+        if (wallTextState.mesh) {
+          const scale = 1 + wallTextState.value * 0.035;
+          wallTextState.mesh.scale.setScalar(scale);
+        }
+        if (wallTextState.glow) {
+          wallTextState.glow.material.opacity = wallTextState.value * 0.15;
+        }
+
+        spatialPrompt.classList.toggle("is-visible", aboutActive);
+        reticle.classList.toggle("is-interactive", Boolean(activeSpatialTarget));
+      }
+
+      function startDoorStep() {
+        if (reducedMotion) return;
+        cameraStep.active = true;
+        cameraStep.elapsed = 0;
+        cameraStep.from.copy(controls.getObject().position);
+        cameraStep.to.set(ROOM.width / 2 - 0.98, ROOM.eyeHeight, GIFT_SHOP.wallZ);
+      }
+
+      function updateCameraStep(delta) {
+        if (!cameraStep.active) return;
+        cameraStep.elapsed += delta;
+        const t = Math.min(cameraStep.elapsed / cameraStep.duration, 1);
+        const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+        controls.getObject().position.lerpVectors(cameraStep.from, cameraStep.to, eased);
+        if (t >= 1) cameraStep.active = false;
+      }
+
+      function showShopfront({ section = "shop", source = "hud" } = {}) {
         if (mode === "shop") return;
         mode = "shop";
         velocity.set(0, 0, 0);
@@ -1407,11 +1558,20 @@
         overlay.classList.add("is-dimmed");
         touchControls.classList.remove("is-visible");
         doorHint.classList.remove("is-visible");
+        spatialPrompt.classList.remove("is-visible");
+        reticle.classList.remove("is-interactive");
         galleryHud.classList.add("is-hidden");
+        modeTransition.querySelector("span").textContent = section === "about" ? "About Doodlewing" : "Gift shop";
         modeTransition.classList.add("is-active");
+        if (source === "door") startDoorStep();
         window.setTimeout(() => {
           shopfront.classList.add("is-visible");
-          shopfront.scrollTop = 0;
+          const sectionNode = section === "about" ? shopfront.querySelector("#about") : shopfront.querySelector("#shop");
+          if (sectionNode && section === "about") {
+            shopfront.scrollTo({ top: Math.max(sectionNode.offsetTop - 96, 0), behavior: reducedMotion ? "auto" : "smooth" });
+          } else {
+            shopfront.scrollTop = 0;
+          }
           modeTransition.classList.remove("is-active");
         }, reducedMotion ? 40 : 430);
       }
@@ -1423,6 +1583,8 @@
           mode = "gallery";
           shopfront.classList.remove("is-visible");
           galleryHud.classList.remove("is-hidden");
+          spatialPrompt.classList.remove("is-visible");
+          reticle.classList.remove("is-interactive");
           controls.getObject().position.set(1.65, ROOM.eyeHeight, 4.35);
           controls.getObject().rotation.y = -Math.PI / 2;
           camera.quaternion.copy(controls.getObject().quaternion);
@@ -1478,6 +1640,12 @@
         const delta = Math.min(clock.getDelta(), 0.05);
         if (mode === "gallery" && (controls.isLocked || fallbackLook.active || reducedMotion)) {
           updateMovement(delta);
+        }
+        updateCameraStep(delta);
+        updateSpatialInteractions(delta);
+        if (atmosphereMotes) {
+          atmosphereMotes.rotation.y += delta * 0.012;
+          atmosphereMotes.rotation.x = Math.sin(clock.elapsedTime * 0.12) * 0.006;
         }
         updateDoorHint();
         renderer.render(scene, camera);

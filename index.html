@@ -317,7 +317,6 @@
       let mode = "gallery";
       let doorHintVisible = false;
       let activeSpatialTarget = null;
-      let atmosphereMotes = null;
 
       const palette = {
         wall: 0xe2ddd2,
@@ -372,11 +371,11 @@
         map: floorSurface.map,
         bumpMap: floorSurface.bump,
         bumpScale: 0.007,
-        roughness: 0.44,
+        roughness: 0.3,
         metalness: 0.0,
-        reflectivity: 0.24,
-        clearcoat: 0.36,
-        clearcoatRoughness: 0.5
+        reflectivity: 0.36,
+        clearcoat: 0.56,
+        clearcoatRoughness: 0.32
       });
 
       const textureLoader = new THREE.TextureLoader();
@@ -386,7 +385,6 @@
       buildEmptyLightingTargets();
       buildGiftShopDoorway();
       hangPaintings();
-      addGalleryAtmosphere();
       renderShopfront();
       window.setTimeout(() => brandLoader.classList.add("is-hidden"), reducedMotion ? 350 : 1250);
 
@@ -934,32 +932,6 @@
         });
       }
 
-      function addGalleryAtmosphere() {
-        if (reducedMotion) return;
-        const count = 120;
-        const positions = new Float32Array(count * 3);
-        const random = seededRandom(31);
-        for (let i = 0; i < count; i += 1) {
-          positions[i * 3] = (random() - 0.5) * (ROOM.width - 1.6);
-          positions[i * 3 + 1] = 1.35 + random() * 2.35;
-          positions[i * 3 + 2] = (random() - 0.5) * (ROOM.depth - 2.0);
-        }
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-        const material = new THREE.PointsMaterial({
-          color: 0xffefd5,
-          size: 0.018,
-          transparent: true,
-          opacity: 0.28,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending
-        });
-        const motes = new THREE.Points(geometry, material);
-        motes.userData.drift = true;
-        atmosphereMotes = motes;
-        scene.add(motes);
-      }
-
       function buildGiftShopDoorway() {
         const group = new THREE.Group();
         group.position.set(ROOM.width / 2 - 0.035, 0, GIFT_SHOP.wallZ);
@@ -1044,7 +1016,7 @@
           new THREE.PlaneGeometry(2.35, 2.72),
           material
         );
-        text.position.set(ROOM.width / 2 - 0.018, 2.08, 2.62);
+        text.position.set(ROOM.width / 2 - 0.018, 2.08, 2.08);
         text.rotation.y = -Math.PI / 2;
         text.userData.isAboutEntry = true;
 
@@ -1643,10 +1615,6 @@
         }
         updateCameraStep(delta);
         updateSpatialInteractions(delta);
-        if (atmosphereMotes) {
-          atmosphereMotes.rotation.y += delta * 0.012;
-          atmosphereMotes.rotation.x = Math.sin(clock.elapsedTime * 0.12) * 0.006;
-        }
         updateDoorHint();
         renderer.render(scene, camera);
       }

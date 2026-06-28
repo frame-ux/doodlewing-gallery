@@ -30,6 +30,7 @@
 
       canvas {
         display: block;
+        touch-action: none;
       }
 
       #overlay {
@@ -98,6 +99,44 @@
         height: 1px;
       }
 
+      #touch-controls {
+        position: fixed;
+        inset: 0;
+        z-index: 3;
+        display: none;
+        pointer-events: none;
+      }
+
+      #touch-controls.is-visible {
+        display: block;
+      }
+
+      #move-pad {
+        position: absolute;
+        left: max(18px, env(safe-area-inset-left));
+        bottom: max(18px, env(safe-area-inset-bottom));
+        width: 112px;
+        height: 112px;
+        border: 1px solid rgba(246, 241, 228, 0.28);
+        border-radius: 50%;
+        background: rgba(18, 17, 14, 0.22);
+        box-shadow: inset 0 0 24px rgba(246, 241, 228, 0.08), 0 8px 28px rgba(0, 0, 0, 0.24);
+        pointer-events: auto;
+        touch-action: none;
+      }
+
+      #move-stick {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 42px;
+        height: 42px;
+        border-radius: 50%;
+        background: rgba(246, 241, 228, 0.74);
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
+        transform: translate(-50%, -50%);
+      }
+
       #webgl-message {
         position: fixed;
         inset: 0;
@@ -123,6 +162,11 @@
       <p>Click to enter · WASD to move · Mouse to look · Click a painting to inspect · ESC to exit</p>
     </div>
     <div id="reticle" aria-hidden="true"></div>
+    <div id="touch-controls" aria-hidden="true">
+      <div id="move-pad">
+        <div id="move-stick"></div>
+      </div>
+    </div>
 
     <script>
       window.galleryStarted = false;
@@ -176,9 +220,18 @@
       ];
 
       const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const hasTouchControls = window.matchMedia("(hover: none), (pointer: coarse), (max-width: 768px)").matches;
       const checkpointPreview = new URLSearchParams(window.location.search).has("checkpoint");
       const overlay = document.getElementById("overlay");
+      const overlayText = overlay.querySelector("p");
+      const touchControls = document.getElementById("touch-controls");
+      const movePad = document.getElementById("move-pad");
+      const moveStick = document.getElementById("move-stick");
       const webglMessage = document.getElementById("webgl-message");
+
+      if (hasTouchControls) {
+        overlayText.textContent = "Tap to enter · Drag left pad to move · Swipe right side to look";
+      }
 
       if (!hasWebGL()) {
         webglMessage.classList.add("is-visible");
@@ -210,6 +263,8 @@
       const clock = new THREE.Clock();
       const velocity = new THREE.Vector3();
       const moveState = { forward: false, backward: false, left: false, right: false };
+      const touchMove = { active: false, pointerId: null, centerX: 0, centerY: 0, x: 0, y: 0 };
+      const touchLook = { active: false, pointerId: null, x: 0, y: 0 };
       const fallbackLook = { active: false, dragging: false };
       const fallbackEuler = new THREE.Euler(0, 0, 0, "YXZ");
 
@@ -291,6 +346,10 @@
 
       overlay.addEventListener("pointerdown", () => {
         if (checkpointPreview) return;
+        if (hasTouchControls) {
+          enterFallbackLook();
+          return;
+        }
         renderer.domElement.focus();
         try {
           controls.lock();
@@ -326,17 +385,58 @@
       window.addEventListener("mousemove", (event) => {
         if (!fallbackLook.active || controls.isLocked) return;
         fallbackEuler.setFromQuaternion(camera.quaternion);
-        fallbackEuler.y -= event.movementX * 0.002;
-        fallbackEuler.x -= event.movementY * 0.002;
-        fallbackEuler.x = THREE.MathUtils.clamp(fallbackEuler.x, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
-        camera.quaternion.setFromEuler(fallbackEuler);
+        applyFallbackLook(event.movementX, event.movementY, 0.002);
       });
+
+      movePad.addEventListener("pointerdown", (event) => {
+        if (!fallbackLook.active || !hasTouchControls) return;
+        event.preventDefault();
+        movePad.setPointerCapture(event.pointerId);
+        const rect = movePad.getBoundingClientRect();
+        touchMove.active = true;
+        touchMove.pointerId = event.pointerId;
+        touchMove.centerX = rect.left + rect.width / 2;
+        touchMove.centerY = rect.top + rect.height / 2;
+        updateTouchMove(event.clientX, event.clientY);
+      });
+
+      movePad.addEventListener("pointermove", (event) => {
+        if (!touchMove.active || event.pointerId !== touchMove.pointerId) return;
+        event.preventDefault();
+        updateTouchMove(event.clientX, event.clientY);
+      });
+
+      movePad.addEventListener("pointerup", endTouchMove);
+      movePad.addEventListener("pointercancel", endTouchMove);
+
+      renderer.domElement.addEventListener("pointerdown", (event) => {
+        if (!fallbackLook.active || !hasTouchControls || event.clientX < window.innerWidth * 0.34) return;
+        event.preventDefault();
+        renderer.domElement.setPointerCapture(event.pointerId);
+        touchLook.active = true;
+        touchLook.pointerId = event.pointerId;
+        touchLook.x = event.clientX;
+        touchLook.y = event.clientY;
+      });
+
+      renderer.domElement.addEventListener("pointermove", (event) => {
+        if (!touchLook.active || event.pointerId !== touchLook.pointerId) return;
+        event.preventDefault();
+        applyFallbackLook(event.clientX - touchLook.x, event.clientY - touchLook.y, 0.0042);
+        touchLook.x = event.clientX;
+        touchLook.y = event.clientY;
+      });
+
+      renderer.domElement.addEventListener("pointerup", endTouchLook);
+      renderer.domElement.addEventListener("pointercancel", endTouchLook);
 
       window.addEventListener("keydown", (event) => {
         if (event.code === "Escape" && fallbackLook.active) {
           fallbackLook.active = false;
           fallbackLook.dragging = false;
+          resetTouchControls();
           overlay.classList.remove("is-dimmed");
+          touchControls.classList.remove("is-visible");
           return;
         }
         switch (event.code) {
@@ -1020,11 +1120,58 @@
         return new THREE.Vector3(Math.sin(rotationY) * amount, 0, Math.cos(rotationY) * amount);
       }
 
+      function applyFallbackLook(deltaX, deltaY, sensitivity) {
+        fallbackEuler.setFromQuaternion(camera.quaternion);
+        fallbackEuler.y -= deltaX * sensitivity;
+        fallbackEuler.x -= deltaY * sensitivity;
+        fallbackEuler.x = THREE.MathUtils.clamp(fallbackEuler.x, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
+        camera.quaternion.setFromEuler(fallbackEuler);
+        controls.getObject().quaternion.copy(camera.quaternion);
+      }
+
+      function updateTouchMove(clientX, clientY) {
+        const maxDistance = 42;
+        const rawX = clientX - touchMove.centerX;
+        const rawY = clientY - touchMove.centerY;
+        const distance = Math.hypot(rawX, rawY);
+        const scale = distance > maxDistance ? maxDistance / distance : 1;
+        const x = rawX * scale;
+        const y = rawY * scale;
+        touchMove.x = x / maxDistance;
+        touchMove.y = y / maxDistance;
+        moveStick.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+      }
+
+      function endTouchMove(event) {
+        if (!touchMove.active || event.pointerId !== touchMove.pointerId) return;
+        touchMove.active = false;
+        touchMove.pointerId = null;
+        touchMove.x = 0;
+        touchMove.y = 0;
+        moveStick.style.transform = "translate(-50%, -50%)";
+      }
+
+      function endTouchLook(event) {
+        if (!touchLook.active || event.pointerId !== touchLook.pointerId) return;
+        touchLook.active = false;
+        touchLook.pointerId = null;
+      }
+
+      function resetTouchControls() {
+        touchMove.active = false;
+        touchMove.pointerId = null;
+        touchMove.x = 0;
+        touchMove.y = 0;
+        touchLook.active = false;
+        touchLook.pointerId = null;
+        moveStick.style.transform = "translate(-50%, -50%)";
+      }
+
       function updateMovement(delta) {
         const direction = new THREE.Vector3(
-          Number(moveState.right) - Number(moveState.left),
+          Number(moveState.right) - Number(moveState.left) + touchMove.x,
           0,
-          Number(moveState.backward) - Number(moveState.forward)
+          Number(moveState.backward) - Number(moveState.forward) + touchMove.y
         );
 
         if (direction.lengthSq() > 0) {
@@ -1074,6 +1221,7 @@
         if (controls.isLocked || checkpointPreview) return;
         fallbackLook.active = true;
         overlay.classList.add("is-dimmed");
+        if (hasTouchControls) touchControls.classList.add("is-visible");
       }
 
       function hasWebGL() {

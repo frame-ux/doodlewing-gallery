@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Walkable 3D Gallery</title>
+    <title>Doodlewing Gallery</title>
+    <link rel="stylesheet" href="./shopfront.css" />
     <style>
       :root {
         color-scheme: dark;
@@ -158,6 +159,19 @@
   </head>
   <body>
     <div id="webgl-message">This gallery needs WebGL to render. Try opening it in a modern browser with graphics acceleration enabled.</div>
+    <div id="brand-loader">
+      <div class="loader-card">
+        <div class="brand-logo" aria-label="Doodlewing">
+          <svg width="220" height="38" viewBox="0 0 220 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path class="wing-left" d="M23.5 19.2C18.2 11.1 10.6 8.6 4.8 12.4C9.9 13.8 13.2 17 15.1 21.6C10.6 20.5 6.8 21.2 3.4 24.4C9.7 26.9 17.3 25.6 23.5 19.2Z" fill="#FF6B5F"/>
+            <path class="wing-right" d="M24.5 18.4C29.6 10.8 36.6 8.9 41.7 12.6C37.2 13.7 33.9 16.7 31.8 21.2C35.9 20.6 39.3 21.5 42.3 24.3C36.3 26.6 29.7 25.1 24.5 18.4Z" fill="#FFD166"/>
+            <path class="scribble-path" d="M20.8 20.2C22.3 18.6 24.6 18.6 26.1 20.2" stroke="#25221E" stroke-width="2.2" stroke-linecap="round"/>
+            <text x="52" y="26" fill="#25221E" font-family="Fraunces, Georgia, serif" font-size="25" font-weight="700">Doodlewing</text>
+          </svg>
+        </div>
+        <p>Framing the masterpieces. Nearly ready.</p>
+      </div>
+    </div>
     <div id="overlay">
       <p>Click to enter · WASD to move · Mouse to look · Click a painting to inspect · ESC to exit</p>
     </div>
@@ -165,6 +179,19 @@
     <div id="touch-controls" aria-hidden="true">
       <div id="move-pad">
         <div id="move-stick"></div>
+      </div>
+    </div>
+    <div id="gallery-hud">
+      <button class="gallery-pill" type="button" data-open-shop>Gift shop</button>
+    </div>
+    <div id="door-hint">Click the gift shop door to browse prints</div>
+    <div id="mode-transition" aria-hidden="true"><span>Gift shop</span></div>
+    <main id="shopfront" aria-label="Doodlewing shopfront"></main>
+    <div id="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+      <div class="modal-card">
+        <h2 id="checkout-title">Checkout coming soon</h2>
+        <p>Your basket is ready for the future Stripe handoff. For now, consider this a very well-dressed placeholder.</p>
+        <button class="shop-button primary" type="button" data-close-modal>Back to shop</button>
       </div>
     </div>
 
@@ -227,6 +254,12 @@
       const touchControls = document.getElementById("touch-controls");
       const movePad = document.getElementById("move-pad");
       const moveStick = document.getElementById("move-stick");
+      const brandLoader = document.getElementById("brand-loader");
+      const galleryHud = document.getElementById("gallery-hud");
+      const doorHint = document.getElementById("door-hint");
+      const modeTransition = document.getElementById("mode-transition");
+      const shopfront = document.getElementById("shopfront");
+      const checkoutModal = document.getElementById("checkout-modal");
       const webglMessage = document.getElementById("webgl-message");
 
       if (hasTouchControls) {
@@ -267,6 +300,12 @@
       const touchLook = { active: false, pointerId: null, x: 0, y: 0 };
       const fallbackLook = { active: false, dragging: false };
       const fallbackEuler = new THREE.Euler(0, 0, 0, "YXZ");
+      const raycaster = new THREE.Raycaster();
+      const centerPointer = new THREE.Vector2(0, 0);
+      const shopEntryTargets = [];
+      const basket = [];
+      let mode = "gallery";
+      let doorHintVisible = false;
 
       const palette = {
         wall: 0xe2ddd2,
@@ -335,6 +374,8 @@
       buildEmptyLightingTargets();
       buildGiftShopDoorway();
       hangPaintings();
+      renderShopfront();
+      window.setTimeout(() => brandLoader.classList.add("is-hidden"), reducedMotion ? 350 : 1250);
 
       if (checkpointPreview) {
         overlay.classList.add("is-dimmed");
@@ -376,6 +417,34 @@
 
       renderer.domElement.addEventListener("pointerdown", () => {
         fallbackLook.dragging = true;
+      });
+
+      renderer.domElement.addEventListener("click", () => {
+        if (mode !== "gallery") return;
+        if (isLookingAtShopDoor()) showShopfront();
+      });
+
+      document.querySelectorAll("[data-open-shop]").forEach((button) => {
+        button.addEventListener("click", showShopfront);
+      });
+
+      shopfront.addEventListener("click", (event) => {
+        const action = event.target.closest("[data-shop-action]");
+        if (!action) return;
+        if (action.dataset.shopAction === "gallery") showGallery();
+        if (action.dataset.shopAction === "featured") addBasketItem("Host your own digital exhibition", 19);
+        if (action.dataset.shopAction === "print") {
+          const card = action.closest("[data-product-card]");
+          const select = card.querySelector("select");
+          addBasketItem(card.dataset.title, Number(select.value));
+        }
+        if (action.dataset.shopAction === "checkout") checkoutModal.classList.add("is-visible");
+      });
+
+      checkoutModal.addEventListener("click", (event) => {
+        if (event.target === checkoutModal || event.target.closest("[data-close-modal]")) {
+          checkoutModal.classList.remove("is-visible");
+        }
       });
 
       window.addEventListener("pointerup", () => {
@@ -889,6 +958,15 @@
         sign.position.set(0, 2.82, 0.086);
         group.add(sign);
 
+        const shopTrigger = new THREE.Mesh(
+          new THREE.PlaneGeometry(GIFT_SHOP.openingWidth + 0.28, GIFT_SHOP.openingHeight + 0.34),
+          new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+        );
+        shopTrigger.position.set(0, GIFT_SHOP.openingHeight / 2, 0.095);
+        shopTrigger.userData.isShopEntry = true;
+        group.add(shopTrigger);
+        shopEntryTargets.push(shopTrigger);
+
         scene.add(group);
 
         const signLightTarget = new THREE.Object3D();
@@ -1167,6 +1245,193 @@
         moveStick.style.transform = "translate(-50%, -50%)";
       }
 
+      function logoMarkup() {
+        return `
+          <span class="brand-logo" aria-label="Doodlewing">
+            <svg width="220" height="38" viewBox="0 0 220 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path class="wing-left" d="M23.5 19.2C18.2 11.1 10.6 8.6 4.8 12.4C9.9 13.8 13.2 17 15.1 21.6C10.6 20.5 6.8 21.2 3.4 24.4C9.7 26.9 17.3 25.6 23.5 19.2Z" fill="#FF6B5F"/>
+              <path class="wing-right" d="M24.5 18.4C29.6 10.8 36.6 8.9 41.7 12.6C37.2 13.7 33.9 16.7 31.8 21.2C35.9 20.6 39.3 21.5 42.3 24.3C36.3 26.6 29.7 25.1 24.5 18.4Z" fill="#FFD166"/>
+              <path d="M20.8 20.2C22.3 18.6 24.6 18.6 26.1 20.2" stroke="#25221E" stroke-width="2.2" stroke-linecap="round"/>
+              <text x="52" y="26" fill="#25221E" font-family="Fraunces, Georgia, serif" font-size="25" font-weight="700">Doodlewing</text>
+            </svg>
+          </span>
+        `;
+      }
+
+      function renderShopfront() {
+        const productCards = ARTWORKS.map((artwork, index) => {
+          const prices = [
+            [24, 29, 35],
+            [29, 35, 42],
+            [24, 35, 45],
+            [29, 39, 48],
+            [24, 29, 39],
+            [29, 35, 44],
+            [35, 42, 52]
+          ][index];
+          return `
+            <article class="product-card" data-product-card data-title="${artwork.title}">
+              <img src="${artwork.image}" alt="${artwork.title} print preview" />
+              <div>
+                <h3>${artwork.title}</h3>
+                <div class="product-meta"><span>Fine art print</span><strong>from £${prices[0]}</strong></div>
+              </div>
+              <div class="size-row">
+                <label for="size-${index}">Size</label>
+                <select id="size-${index}" aria-label="${artwork.title} print size">
+                  <option value="${prices[0]}">A4 · £${prices[0]}</option>
+                  <option value="${prices[1]}">A3 · £${prices[1]}</option>
+                  <option value="${prices[2]}">A2 · £${prices[2]}</option>
+                </select>
+              </div>
+              <button class="shop-button primary" type="button" data-shop-action="print">Buy print</button>
+            </article>
+          `;
+        }).join("");
+
+        shopfront.innerHTML = `
+          <header class="shop-header">
+            ${logoMarkup()}
+            <nav class="shop-nav" aria-label="Shopfront navigation">
+              <a href="#shop">Shop</a>
+              <a href="#about">About</a>
+              <a href="#soon">Coming soon</a>
+              <button type="button" data-shop-action="gallery">Back to the Gallery</button>
+            </nav>
+          </header>
+          <div class="shop-main">
+            <section id="shop" class="shop-section shop-hero">
+              <div class="hero-copy">
+                <p class="eyebrow">Digital exhibition starter</p>
+                <h1>Host your own digital exhibition</h1>
+                <p>Doodlewing gives your mini Michelangelo their very own interactive exhibition. Upload their masterpieces, walk the gallery, share the show, then quietly pretend you are not crying.</p>
+                <div class="hero-actions">
+                  <button class="shop-button primary" type="button" data-shop-action="featured">Add exhibition · £19</button>
+                  <button class="shop-button blue" type="button" data-shop-action="gallery">Back to the Gallery</button>
+                </div>
+              </div>
+              <aside class="featured-product">
+                <div>
+                  <p class="eyebrow">Featured offer</p>
+                  <h2>Your child's first private view</h2>
+                  <p>One polished interactive show, ready to send to grandparents, godparents and anyone who has ever said "that belongs in a gallery".</p>
+                </div>
+                <div>
+                  <p class="price">£19</p>
+                  <button class="shop-button primary" type="button" data-shop-action="featured">Add to basket</button>
+                </div>
+              </aside>
+            </section>
+            <section class="shop-section">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Gift shop</p>
+                  <h2>Prints from the show</h2>
+                </div>
+                <p>Choose a size, add a favourite, and imagine the fridge finally getting a day off.</p>
+              </div>
+              <div class="print-grid">${productCards}</div>
+            </section>
+            <section id="about" class="shop-section about-panel">
+              <div class="about-copy">
+                <p class="eyebrow">About Doodlewing</p>
+                <h2>A tiny museum for very serious artists</h2>
+                <p>Doodlewing gives your mini Michelangelo their very own interactive exhibition — upload their masterpieces, walk the gallery, and share the show.</p>
+                <p>It is parent-facing, child-celebrating, and built for the sweet spot between "aw, look what they made" and "we should probably frame that".</p>
+              </div>
+              <div class="about-stats" aria-label="Doodlewing highlights">
+                <div class="stat-tile"><strong>7</strong><span>works in this show</span></div>
+                <div class="stat-tile"><strong>3D</strong><span>walkable gallery mode</span></div>
+                <div class="stat-tile"><strong>2D</strong><span>polished shopfront mode</span></div>
+              </div>
+            </section>
+            <section id="soon" class="shop-section">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Coming soon</p>
+                  <h2>Next wings</h2>
+                </div>
+              </div>
+              <div class="roadmap-grid">
+                <article class="roadmap-card"><span>Locked</span><h3>Audio guides</h3><p>Hear the artist explain the work in their own wildly authoritative words.</p></article>
+                <article class="roadmap-card"><span>Locked</span><h3>Catalogues</h3><p>A keepsake exhibition catalogue for the coffee table, or at least the proud-parent shelf.</p></article>
+                <article class="roadmap-card"><span>Locked</span><h3>Themed wings</h3><p>Space rockets, pets, self-portraits, glitter periods. Curators need eras.</p></article>
+                <article class="roadmap-card"><span>Locked</span><h3>Guest book</h3><p>Let invited visitors leave warm notes after the private view.</p></article>
+              </div>
+            </section>
+          </div>
+          <div class="basket-dock is-empty">
+            <div class="basket-dock-inner">
+              <strong id="basket-summary">Basket empty</strong>
+              <button class="shop-button primary" type="button" data-shop-action="checkout">Checkout coming soon</button>
+            </div>
+          </div>
+        `;
+      }
+
+      function addBasketItem(title, price) {
+        basket.push({ title, price });
+        const total = basket.reduce((sum, item) => sum + item.price, 0);
+        document.querySelector(".basket-dock")?.classList.remove("is-empty");
+        document.getElementById("basket-summary").textContent = `${basket.length} item${basket.length === 1 ? "" : "s"} · £${total}`;
+      }
+
+      function isLookingAtShopDoor() {
+        if (!shopEntryTargets.length) return false;
+        raycaster.setFromCamera(centerPointer, camera);
+        return raycaster.intersectObjects(shopEntryTargets, false).length > 0;
+      }
+
+      function isNearShopDoor() {
+        const position = controls.getObject().position;
+        return position.x > ROOM.width / 2 - 1.5 && Math.abs(position.z - GIFT_SHOP.wallZ) < 1.45;
+      }
+
+      function updateDoorHint() {
+        if (mode !== "gallery") return;
+        const shouldShow = isNearShopDoor();
+        if (shouldShow === doorHintVisible) return;
+        doorHintVisible = shouldShow;
+        doorHint.classList.toggle("is-visible", shouldShow);
+      }
+
+      function showShopfront() {
+        if (mode === "shop") return;
+        mode = "shop";
+        velocity.set(0, 0, 0);
+        Object.assign(moveState, { forward: false, backward: false, left: false, right: false });
+        resetTouchControls();
+        if (controls.isLocked) controls.unlock();
+        fallbackLook.active = false;
+        fallbackLook.dragging = false;
+        overlay.classList.add("is-dimmed");
+        touchControls.classList.remove("is-visible");
+        doorHint.classList.remove("is-visible");
+        galleryHud.classList.add("is-hidden");
+        modeTransition.classList.add("is-active");
+        window.setTimeout(() => {
+          shopfront.classList.add("is-visible");
+          shopfront.scrollTop = 0;
+          modeTransition.classList.remove("is-active");
+        }, reducedMotion ? 40 : 430);
+      }
+
+      function showGallery() {
+        if (mode === "gallery") return;
+        modeTransition.classList.add("is-active");
+        window.setTimeout(() => {
+          mode = "gallery";
+          shopfront.classList.remove("is-visible");
+          galleryHud.classList.remove("is-hidden");
+          controls.getObject().position.set(1.65, ROOM.eyeHeight, 4.35);
+          controls.getObject().rotation.y = -Math.PI / 2;
+          camera.quaternion.copy(controls.getObject().quaternion);
+          overlay.classList.add("is-dimmed");
+          enterFallbackLook();
+          modeTransition.classList.remove("is-active");
+        }, reducedMotion ? 40 : 430);
+      }
+
       function updateMovement(delta) {
         const direction = new THREE.Vector3(
           Number(moveState.right) - Number(moveState.left) + touchMove.x,
@@ -1211,9 +1476,10 @@
       function animate() {
         requestAnimationFrame(animate);
         const delta = Math.min(clock.getDelta(), 0.05);
-        if (controls.isLocked || fallbackLook.active || reducedMotion) {
+        if (mode === "gallery" && (controls.isLocked || fallbackLook.active || reducedMotion)) {
           updateMovement(delta);
         }
+        updateDoorHint();
         renderer.render(scene, camera);
       }
 
